@@ -1,5 +1,9 @@
 name: Deploy to GitHub Pages
 on: push to main branch
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
