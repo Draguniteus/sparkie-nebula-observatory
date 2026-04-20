@@ -1,0 +1,7 @@
+{
+  "name": "sparkie-nebula-observatory",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.copyFileSync('index.html','dist/index.html');console.log('Built!');\""
+  }
+}
