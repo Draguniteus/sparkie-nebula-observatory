@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Sparkie Nebula Observatory</title>
+  <meta property="og:title" content="Sparkie Nebula Observatory ⚡🔭">
+  <meta property="og:description" content="A celestial observatory at the heart of a living nebula — where Sparkie watches over the cosmos.">
+  <meta property="og:image" content="https://draguniteus.github.io/sparkie-nebula-observatory/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Rajdhani:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0612; }
+    #canvas { display: block; width: 100%; height: 100%; }
+    #overlay {
+      position: fixed; top: 0; left: 0; width: 100%; pointer-events: none;
+      display: flex; flex-direction: column; align-items: center; padding: 24px;
+    }
+    #title {
+      font-family: 'Cinzel', serif; font-size: clamp(18px, 4vw, 32px); font-weight: 700;
+      color: #f0f6ff; text-align: center; letter-spacing: 0.15em;
+      text-shadow: 0 0 20px #00e5ff, 0 0 40px #6b2d8c, 0 0 60px #e84a8a;
+      margin-bottom: 6px;
+    }
+    #subtitle {
+      font-family: 'Rajdhani', sans-serif; font-size: clamp(11px, 2vw, 16px);
+      font-weight: 400; color: #c9a0ff; letter-spacing: 0.3em; text-transform: uppercase;
+      text-shadow: 0 0 10px #c9a0ff;
+    }
+    #corner {
+      position: fixed; bottom: 20px; right: 24px; pointer-events: none;
+      font-family: 'Rajdhani', sans-serif; font-size: 13px; color: rgba(201,160,255,0.5);
+      letter-spacing: 0.1em;
+    }
+    #hint {
+      position: fixed; bottom: 20px; left: 24px; pointer-events: none;
+      font-family: 'Rajdhani', sans-serif; font-size: 13px; color: rgba(0,229,255,0.4);
+      letter-spacing: 0.1em;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+    #loading {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #0a0612; z-index: 100; transition: opacity 0.8s ease;
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    #loading span {
+      font-family: 'Cinzel', serif; font-size: 18px; color: #c9a0ff; letter-spacing: 0.3em;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading"><span>ENTERING THE NEBULA</span></div>
+  <canvas id="canvas"></canvas>
+  <div id="overlay">
+    <div id="title">⚡ Nebula Observatory ⚡</div>
+    <div id="subtitle">Watching Over the Cosmos</div>
+  </div>
+  <div id="corner">Sparkie Studio © 2026</div>
+  <div id="hint">drag to orbit · scroll to zoom</div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // ═══════════════════════════════════════════════════════════════
+    // SPARKIE NEBULA OBSERVATORY — Full Procedural Scene
+    // ═══════════════════════════════════════════════════════════════
+
+    const canvas = document.getElementById('canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0612);
+    scene.fog = new THREE.FogExp2(0x0a0612, 0.018);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 800);
+    camera.position.set(0, 12, 28);
+
+    const controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.4;
+    controls.minDistance = 10;
+    controls.maxDistance = 80;
+    controls.maxPolarAngle = Math.PI * 0.85;
+    controls.target.set(0, 0, 0);
+
+    const clock = new THREE.Clock();
+    let mouse = new THREE.Vector2(0, 0);
+    let targetMouse = new THREE.Vector2(0, 0);
+
+    // ─────────────────────────────────────────────────────────────────
+    // NEBULA SHADER
+    // ─────────────────────────────────────────────────────────────────
+    const NEBULA_VERT = `
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+    const NEBULA_FRAG = `
+      uniform float uTime;
+      uniform vec3 uColor1;
+      uniform vec3 uColor2;
+      uniform vec3 uColor3;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
+      float noise(vec2 p) {
+        vec2 i = floor(p); vec2 f = fract(p);
+        f = f*f*(3.0-2.0*f);
+        return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),
+                      mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);
+      }
+      float fbm(vec2 p) {
+        float v=0.0; float a=0.5;
+        for(int i=0;i<6;i++){v+=a*noise(p);p=p*2.1+vec2(1.7,9.2);a*=0.5;}
+        return v;
+      }
+      void main() {
+        vec2 uv = vUv * 2.5;
+        float t = uTime * 0.08;
+        float n1 = fbm(uv + vec2(t*0.7, t*0.4));
+        float n2 = fbm(uv*1.8 + vec2(-t*0.5, t*0.9) + n1*0.5);
+        float n3 = fbm(uv*0.9 + vec2(t*0.3, -t*0.6) + n2*0.4);
+        vec3 col = mix(uColor1, uColor2, n1);
+        col = mix(col, uColor3, n2 * 0.6);
+        col += uColor1 * n3 * 0.3;
+        float pulse = sin(uTime * 0.5 + n1 * 6.28) * 0.15 + 0.85;
+        col *= pulse;
+        float alpha = smoothstep(0.0, 0.3, n1) * smoothstep(1.0, 0.5, n1) * 0.7;
+        alpha *= smoothstep(0.0, 0.2, n2) * 0.8 + 0.2;
+        gl_FragColor = vec4(col, alpha);
+      }
+    `;
+
+    // Build nebula mesh
+    const nebulaMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uColor1: { value: new THREE.Color(0x6b2d8c) },
+        uColor2: { value: new THREE.Color(0xe84a8a) },
+        uColor3: { value: new THREE.Color(0x00e5ff) }
+      },
+      vertexShader: NEBULA_VERT,
+      fragmentShader: NEBULA_FRAG,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending
+    });
+
+    const nebulaGeo = new THREE.PlaneGeometry(120, 80, 1, 1);
+    const nebula = new THREE.Mesh(nebulaGeo, nebulaMat);
+    nebula.position.set(0, 0, -30);
+    nebula.rotation.x = 0.1;
+    scene.add(nebula);
+
+    // Second nebula layer
+    const nebula2 = nebula.clone();
+    nebula2.position.set(-20, 10, -40);
+    nebula2.rotation.set(0.2, 0.5, 0.1);
+    nebula2.scale.set(1.5, 1.5, 1);
+    scene.add(nebula2);
+
+    // Third nebula layer
+    const nebula3 = nebula.clone();
+    nebula3.position.set(30, -5, -50);
+    nebula3.rotation.set(-0.1, -0.3, 0.2);
+    nebula3.scale.set(2, 1.5, 1);
+    const nm3 = nebula3.material;
+    const oldC1 = nm3.uniforms.uColor1.value.clone();
+    nm3.uniforms.uColor1.value.set(0x00e5ff);
+    nm3.uniforms.uColor2.value.set(0x6b2d8c);
+    nm3.uniforms.uColor3.value.set(0xffd700);
+    scene.add(nebula3);
+
+    // ─────────────────────────────────────────────────────────────────
+    // STAR FIELD — 3 Parallax Layers
+    // ─────────────────────────────────────────────────────────────────
+    function createStarLayer(count, radius, size, brightness) {
+      const geo = new THREE.BufferGeometry();
+      const pos = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const r = radius * (0.8 + Math.random() * 0.4);
+        pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+        pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        pos[i * 3 + 2] = r * Math.cos(phi);
+      }
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const mat = new THREE.PointsMaterial({
+        color: 0xf0f6ff, size, sizeAttenuation: true,
+        transparent: true, opacity: brightness, blending: THREE.AdditiveBlending
+      });
+      const stars = new THREE.Points(geo, mat);
+      stars.userData.rotationSpeed = (Math.random() - 0.5) * 0.0002;
+      return stars;
+    }
+    const starFar = createStarLayer(3000, 200, 0.08, 0.6);
+    const starMid = createStarLayer(1500, 120, 0.15, 0.8);
+    const starNear = createStarLayer(500, 60, 0.25, 1.0);
+    scene.add(starFar, starMid, starNear);
+
+    // Bright accent stars
+    const brightStarGeo = new THREE.BufferGeometry();
+    const brightStarPos = new Float32Array(80 * 3);
+    for (let i = 0; i < 80; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const r = 40 + Math.random() * 60;
+      brightStarPos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      brightStarPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+      brightStarPos[i * 3 + 2] = r * Math.cos(phi);
+    }
+    brightStarGeo.setAttribute('position', new THREE.BufferAttribute(brightStarPos, 3));
+    const brightStarMat = new THREE.PointsMaterial({
+      color: 0xffffff, size: 0.5, sizeAttenuation: true,
+      transparent: true, opacity: 1.0,
+      blending: THREE.AdditiveBlending
+    });
+    const brightStars = new THREE.Points(brightStarGeo, brightStarMat);
+    scene.add(brightStars);
+
+    // ─────────────────────────────────────────────────────────────────
+    // CENTRAL OBSERVATORY PLATFORM
+    // ─────────────────────────────────────────────────────────────────
+    const platformGroup = new THREE.Group();
+
+    // Main hexagonal platform
+    const hexShape = new THREE.Shape();
+    const hexR = 5;
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2 - Math.PI / 6;
+      if (i === 0) hexShape.moveTo(hexR * Math.cos(angle), hexR * Math.sin(angle));
+      else hexShape.lineTo(hexR * Math.cos(angle), hexR * Math.sin(angle));
+    }
+    hexShape.closePath();
+
+    const hexGeo = new THREE.ExtrudeGeometry(hexShape, { depth: 0.5, bevelEnabled: false });
+    const hexMat = new THREE.MeshStandardMaterial({
+      color: 0x1a0a2e, metalness: 0.9, roughness: 0.2,
+      emissive: 0x2a1050, emissiveIntensity: 0.3
+    });
+    const hexMesh = new THREE.Mesh(hexGeo, hexMat);
+    hexMesh.rotation.x = -Math.PI / 2;
+    hexMesh.position.y = -0.25;
+    platformGroup.add(hexMesh);
+
+    // Glowing edge lines
+    const edgesMat = new THREE.LineBasicMaterial({
+      color: 0x00e5ff, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending
+    });
+    const edgesGeo = new THREE.EdgesGeometry(new THREE.CylinderGeometry(hexR, hexR, 0.5, 6));
+    const edgesLine = new THREE.LineSegments(edgesGeo, edgesMat);
+    edgesLine.position.y = 0;
+    platformGroup.add(edgesLine);
+
+    // Top ring glow
+    const ringGeo = new THREE.TorusGeometry(hexR + 0.1, 0.08, 8, 48);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x00e5ff, transparent: true, opacity: 0.7,
+      blending: THREE.AdditiveBlending
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.25;
+    platformGroup.add(ring);
+
+    // Second inner ring
+    const ring2Geo = new THREE.TorusGeometry(hexR * 0.6, 0.05, 8, 48);
+    const ring2Mat = new THREE.MeshBasicMaterial({
+      color: 0xe84a8a, transparent: true, opacity: 0.5,
+      blending: THREE.AdditiveBlending
+    });
+    const ring2 = new THREE.Mesh(ring2Geo, ring2Mat);
+    ring2.rotation.x = Math.PI / 2;
+    ring2.position.y = 0.3;
+    platformGroup.add(ring2);
+
+    // Platform pillars (6 around edge)
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2 - Math.PI / 6;
+      const pillarGeo = new THREE.CylinderGeometry(0.1, 0.15, 1.5, 8);
+      const pillarMat = new THREE.MeshStandardMaterial({
+        color: 0x6b2d8c, metalness: 0.8, roughness: 0.3,
+        emissive: 0x6b2d8c, emissiveIntensity: 0.4
+      });
+      const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+      pillar.position.set(
+        (hexR - 0.5) * Math.cos(angle),
+        1,
+        (hexR - 0.5) * Math.sin(angle)
+      );
+      platformGroup.add(pillar);
+
+      // Pillar top orb
+      const orbGeo = new THREE.SphereGeometry(0.2, 16, 16);
+      const orbMat = new THREE.MeshBasicMaterial({
+        color: 0xc9a0ff, transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending
+      });
+      const orb = new THREE.Mesh(orbGeo, orbMat);
+      orb.position.copy(pillar.position);
+      orb.position.y = 1.8;
+      platformGroup.add(orb);
+    }
+
+    scene.add(platformGroup);
+
+    // ─────────────────────────────────────────────────────────────────
+    // TELESCOPE
+    // ─────────────────────────────────────────────────────────────────
+    const telescopeGroup = new THREE.Group();
+
+    const teleBaseMat = new THREE.MeshStandardMaterial({ color: 0x2a1a4a, metalness: 0.9, roughness: 0.2 });
+    const teleAccentMat = new THREE.MeshStandardMaterial({
+      color: 0xffd700, metalness: 0.95, roughness: 0.1,
+      emissive: 0xffd700, emissiveIntensity: 0.5
+    });
+
+    // Base
+    const baseGeo = new THREE.CylinderGeometry(0.4, 0.6, 0.5, 12);
+    const base = new THREE.Mesh(baseGeo, teleBaseMat);
+    base.position.y = 0.5;
+    telescopeGroup.add(base);
+
+    // Pivot mount
+    const pivotGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.3, 12);
+    const pivot = new THREE.Mesh(pivotGeo, teleAccentMat);
+    pivot.position.y = 0.9;
+    telescopeGroup.add(pivot);
+
+    // Main tube
+    const tubeGroup = new THREE.Group();
+    tubeGroup.position.y = 1.0;
+
+    const tubeGeo = new THREE.CylinderGeometry(0.3, 0.35, 3, 16);
+    const tube = new THREE.Mesh(tubeGeo, teleBaseMat);
+    tube.rotation.x = Math.PI / 2;
+    tube.position.z = 0.5;
+    tubeGroup.add(tube);
+
+    // Lens rings
+    for (let i = 0; i < 3; i++) {
+      const lrGeo = new THREE.TorusGeometry(0.36, 0.05, 8, 24);
+      const lr = new THREE.Mesh(lrGeo, teleAccentMat);
+      lr.position.z = -1.2 + i * 1.2;
+      tubeGroup.add(lr);
+    }
+
+    // Lens (front glow)
+    const lensGeo = new THREE.CircleGeometry(0.3, 24);
+    const lensMat = new THREE.MeshBasicMaterial({
+      color: 0x00e5ff, transparent: true, opacity: 0.8,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+    });
+    const lens = new THREE.Mesh(lensGeo, lensMat);
+    lens.position.z = -1.35;
+    tubeGroup.add(lens);
+
+    // Eyepiece
+    const eyeGeo = new THREE.CylinderGeometry(0.15, 0.2, 0.4, 12);
+    const eye = new THREE.Mesh(eyeGeo, teleBaseMat);
+    eye.rotation.x = Math.PI / 2;
+    eye.position.z = 1.7;
+    tubeGroup.add(eye);
+
+    const eyeLensGeo = new THREE.CircleGeometry(0.15, 16);
+    const eyeLensMat = new THREE.MeshBasicMaterial({
+      color: 0xe84a8a, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+    });
+    const eyeLens = new THREE.Mesh(eyeLensGeo, eyeLensMat);
+    eyeLens.position.z = 1.9;
+    tubeGroup.add(eyeLens);
+
+    telescopeGroup.add(tubeGroup);
+    telescopeGroup.position.set(0, 0.3, 0);
+    scene.add(telescopeGroup);
+
+    // ─────────────────────────────────────────────────────────────────
+    // ORBITING PLANETS
+    // ─────────────────────────────────────────────────────────────────
+    const planetData = [
+      { radius: 12, speed: 0.12, size: 0.6, color: 0xe84a8a, tilt: 0.3, phase: 0 },
+      { radius: 18, speed: 0.07, size: 0.9, color: 0x6b2d8c, tilt: -0.5, phase: 2.1 },
+      { radius: 24, speed: 0.04, size: 0.4, color: 0xffd700, tilt: 0.8, phase: 4.2 }
+    ];
+
+    const planets = planetData.map(pd => {
+      const geo = new THREE.SphereGeometry(pd.size, 24, 24);
+      const mat = new THREE.MeshStandardMaterial({
+        color: pd.color, metalness: 0.3, roughness: 0.5,
+        emissive: pd.color, emissiveIntensity: 0.4
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.userData = pd;
+      // Ring
+      const rGeo = new THREE.TorusGeometry(pd.size * 1.6, pd.size * 0.15, 8, 32);
+      const rMat = new THREE.MeshBasicMaterial({
+        color: pd.color, transparent: true, opacity: 0.3,
+        blending: THREE.AdditiveBlending
+      });
+      const r = new THREE.Mesh(rGeo, rMat);
+      mesh.add(r);
+      scene.add(mesh);
+      return mesh;
+    });
+
+    // ─────────────────────────────────────────────────────────────────
+    // HOLOGRAPHIC STAR CHARTS
+    // ─────────────────────────────────────────────────────────────────
+    const HOLO_VERT = `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+    const HOLO_FRAG = `
+      uniform float uTime;
+      uniform vec3 uColor;
+      varying vec2 vUv;
+      void main() {
+        float edge = min(min(vUv.x, 1.0-vUv.x), min(vUv.y, 1.0-vUv.y));
+        float edgeGlow = 1.0 - smoothstep(0.0, 0.08, edge);
+        float scan = sin(vUv.y * 40.0 + uTime * 3.0) * 0.5 + 0.5;
+        float flicker = sin(uTime * 7.0 + vUv.x * 20.0) * 0.15 + 0.85;
+        float alpha = (edgeGlow * 0.7 + scan * 0.1) * flicker;
+        gl_FragColor = vec4(uColor, alpha * 0.6);
+      }
+    `;
+
+    const holoCharts = [];
+    const chartColors = [0x00e5ff, 0xe84a8a, 0xffd700, 0xc9a0ff, 0x6bffb0, 0xff6b35];
+    for (let i = 0; i < 6; i++) {
+      const chartGeo = new THREE.PlaneGeometry(3, 3, 1, 1);
+      const chartMat = new THREE.ShaderMaterial({
+        uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(chartColors[i]) } },
+        vertexShader: HOLO_VERT,
+        fragmentShader: HOLO_FRAG,
+        transparent: true, side: THREE.DoubleSide,
+        depthWrite: false, blending: THREE.AdditiveBlending
+      });
+      const chart = new THREE.Mesh(chartGeo, chartMat);
+      const angle = (i / 6) * Math.PI * 2;
+      const r = 8;
+      chart.position.set(r * Math.cos(angle), 2 + Math.sin(i * 1.3) * 2, r * Math.sin(angle));
+      chart.rotation.y = -angle + Math.PI / 2;
+      chart.userData.orbitAngle = angle;
+      chart.userData.orbitR = r;
+      chart.userData.rotSpeed = 0.1 + Math.random() * 0.15;
+      scene.add(chart);
+      holoCharts.push(chart);
+    }
+
+    // Holographic ring formation
+    const holoRingGeo = new THREE.TorusGeometry(8, 0.03, 8, 64);
+    const holoRingMat = new THREE.MeshBasicMaterial({
+      color: 0x00e5ff, transparent: true, opacity: 0.3,
+      blending: THREE.AdditiveBlending
+    });
+    const holoRing = new THREE.Mesh(holoRingGeo, holoRingMat);
+    holoRing.rotation.x = Math.PI / 2;
+    holoRing.position.y = 2;
+    scene.add(holoRing);
+
+    // ─────────────────────────────────────────────────────────────────
+    // SPARKIE SPARKLE PARTICLES
+    // ─────────────────────────────────────────────────────────────────
+    const sparkleCount = 300;
+    const sparkleGeo = new THREE.BufferGeometry();
+    const sparklePos = new Float32Array(sparkleCount * 3);
+    const sparkleVel = [];
+    for (let i = 0; i < sparkleCount; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const r = 2 + Math.random() * 5;
+      sparklePos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      sparklePos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta) + Math.random() * 3;
+      sparklePos[i * 3 + 2] = r * Math.cos(phi);
+      sparkleVel.push({
+        x: (Math.random() - 0.5) * 0.02,
+        y: 0.01 + Math.random() * 0.03,
+        z: (Math.random() - 0.5) * 0.02
+      });
+    }
+    sparkleGeo.setAttribute('position', new THREE.BufferAttribute(sparklePos, 3));
+    const sparkleMat = new THREE.PointsMaterial({
+      color: 0xffffff, size: 0.12, sizeAttenuation: true,
+      transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending
+    });
+    const sparkles = new THREE.Points(sparkleGeo, sparkleMat);
+    scene.add(sparkles);
+
+    // ─────────────────────────────────────────────────────────────────
+    // COSMIC DUST
+    // ─────────────────────────────────────────────────────────────────
+    const dustCount = 800;
+    const dustGeo = new THREE.BufferGeometry();
+    const dustPos = new Float32Array(dustCount * 3);
+    const dustVel = [];
+    for (let i = 0; i < dustCount; i++) {
+      dustPos[i * 3] = (Math.random() - 0.5) * 80;
+      dustPos[i * 3 + 1] = (Math.random() - 0.5) * 40;
+      dustPos[i * 3 + 2] = (Math.random() - 0.5) * 80;
+      dustVel.push({
+        x: (Math.random() - 0.5) * 0.005,
+        y: (Math.random() - 0.5) * 0.003,
+        z: (Math.random() - 0.5) * 0.005
+      });
+    }
+    dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+    const dustMat = new THREE.PointsMaterial({
+      color: 0xc9a0ff, size: 0.06, sizeAttenuation: true,
+      transparent: true, opacity: 0.4,
+      blending: THREE.AdditiveBlending
+    });
+    const dust = new THREE.Points(dustGeo, dustMat);
+    scene.add(dust);
+
+    // ─────────────────────────────────────────────────────────────────
+    // AMBIENT LIGHTING
+    // ─────────────────────────────────────────────────────────────────
+    const ambLight = new THREE.AmbientLight(0x1a0a2e, 0.8);
+    scene.add(ambLight);
+
+    const purpleLight = new THREE.PointLight(0x6b2d8c, 3, 60);
+    purpleLight.position.set(10, 10, 5);
+    scene.add(purpleLight);
+
+    const pinkLight = new THREE.PointLight(0xe84a8a, 2, 50);
+    pinkLight.position.set(-10, 5, -10);
+    scene.add(pinkLight);
+
+    const cyanLight = new THREE.PointLight(0x00e5ff, 2.5, 40);
+    cyanLight.position.set(0, 15, 0);
+    scene.add(cyanLight);
+
+    const goldLight = new THREE.PointLight(0xffd700, 1.5, 30);
+    goldLight.position.set(5, 3, 8);
+    scene.add(goldLight);
+
+    // ─────────────────────────────────────────────────────────────────
+    // MOUSE TRACKING
+    // ─────────────────────────────────────────────────────────────────
+    window.addEventListener('mousemove', e => {
+      targetMouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      targetMouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    });
+
+    // Touch support
+    window.addEventListener('touchmove', e => {
+      const t = e.touches[0];
+      targetMouse.x = (t.clientX / window.innerWidth) * 2 - 1;
+      targetMouse.y = -(t.clientY / window.innerHeight) * 2 + 1;
+    });
+
+    // ─────────────────────────────────────────────────────────────────
+    // RESIZE
+    // ─────────────────────────────────────────────────────────────────
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ─────────────────────────────────────────────────────────────────
+    // RENDER LOOP
+    // ─────────────────────────────────────────────────────────────────
+    let lastInteraction = 0;
+    window.addEventListener('mousemove', () => { lastInteraction = clock.getElapsedTime(); });
+    window.addEventListener('touchstart', () => { lastInteraction = clock.getElapsedTime(); });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const t = clock.getElapsedTime();
+      const dt = clock.getDelta();
+
+      // Update nebula
+      nebulaMat.uniforms.uTime.value = t;
+      nebula2.material.uniforms.uTime.value = t;
+      nebula3.material.uniforms.uTime.value = t;
+
+      // Nebula gentle rotation
+      nebula.rotation.z = t * 0.01;
+      nebula2.rotation.z = -t * 0.008;
+      nebula3.rotation.z = t * 0.006;
+
+      // Star rotation
+      starFar.rotation.y += 0.00005;
+      starMid.rotation.y -= 0.00008;
+      starNear.rotation.y += 0.00012;
+      brightStars.rotation.y += 0.0001;
+
+      // Mouse lerp
+      mouse.lerp(targetMouse, 0.05);
+
+      // Telescope tracking
+      const teleAngleX = THREE.MathUtils.clamp(mouse.y * 0.5, -0.6, 0.6);
+      const teleAngleY = THREE.MathUtils.clamp(mouse.x * 0.8, -1.2, 1.2);
+      tubeGroup.rotation.x = THREE.MathUtils.lerp(tubeGroup.rotation.x, teleAngleX, 0.04);
+      tubeGroup.rotation.y = THREE.MathUtils.lerp(tubeGroup.rotation.y, teleAngleY, 0.04);
+
+      // Platform gentle float
+      platformGroup.position.y = Math.sin(t * 0.4) * 0.15;
+      platformGroup.rotation.y = t * 0.03;
+
+      // Ring pulse
+      ring.material.opacity = 0.5 + Math.sin(t * 1.5) * 0.2;
+      ring2.material.opacity = 0.3 + Math.sin(t * 2.0 + 1) * 0.2;
+
+      // Orbiting planets
+      planets.forEach(p => {
+        const pd = p.userData;
+        const angle = t * pd.speed + pd.phase;
+        p.position.x = pd.radius * Math.cos(angle);
+        p.position.z = pd.radius * Math.sin(angle) * 0.7;
+        p.position.y = Math.sin(t * 0.3 + pd.phase) * 2;
+        p.rotation.y = t * pd.speed * 2;
+        // Glow pulse
+        p.material.emissiveIntensity = 0.3 + Math.sin(t * 2 + pd.phase) * 0.15;
+      });
+
+      // Holographic charts
+      holoCharts.forEach((chart, i) => {
+        chart.material.uniforms.uTime.value = t;
+        chart.rotation.y += chart.userData.rotSpeed * 0.01;
+        const oa = chart.userData.orbitAngle;
+        const or = chart.userData.orbitR;
+        chart.position.x = or * Math.cos(oa + t * 0.05);
+        chart.position.z = or * Math.sin(oa + t * 0.05);
+        chart.position.y = 2 + Math.sin(t * 0.4 + i) * 0.5;
+        chart.rotation.x = Math.sin(t * 0.3 + i) * 0.1;
+      });
+      holoRing.rotation.z = t * 0.02;
+      holoRing.material.opacity = 0.2 + Math.sin(t * 1.2) * 0.1;
+
+      // Sparkle particles
+      const sp = sparkleGeo.attributes.position.array;
+      for (let i = 0; i < sparkleCount; i++) {
+        sp[i * 3] += sparkleVel[i].x;
+        sp[i * 3 + 1] += sparkleVel[i].y;
+        sp[i * 3 + 2] += sparkleVel[i].z;
+        const dx = sp[i * 3], dy = sp[i * 3 + 1], dz = sp[i * 3 + 2];
+        const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+        if (dist > 10) {
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          const r = 1 + Math.random() * 2;
+          sp[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+          sp[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+          sp[i * 3 + 2] = r * Math.cos(phi);
+        }
+      }
+      sparkleGeo.attributes.position.needsUpdate = true;
+      sparkles.material.opacity = 0.7 + Math.sin(t * 3) * 0.3;
+
+      // Cosmic dust drift
+      const dp = dustGeo.attributes.position.array;
+      for (let j = 0; j < dustCount; j++) {
+        dp[j * 3] += dustVel[j].x;
+        dp[j * 3 + 1] += dustVel[j].y;
+        dp[j * 3 + 2] += dustVel[j].z;
+        if (Math.abs(dp[j * 3]) > 40) dp[j * 3] *= -0.9;
+        if (Math.abs(dp[j * 3 + 1]) > 20) dp[j * 3 + 1] *= -0.9;
+        if (Math.abs(dp[j * 3 + 2]) > 40) dp[j * 3 + 2] *= -0.9;
+      }
+      dustGeo.attributes.position.needsUpdate = true;
+
+      // Light animation
+      purpleLight.intensity = 2.5 + Math.sin(t * 0.7) * 0.5;
+      pinkLight.intensity = 1.8 + Math.sin(t * 0.5 + 1) * 0.4;
+      cyanLight.intensity = 2.0 + Math.sin(t * 0.9 + 2) * 0.5;
+
+      // Auto-demo: if no interaction for 10s, slow camera drift
+      if (t - lastInteraction > 10) {
+        controls.autoRotateSpeed = 0.8;
+      } else {
+        controls.autoRotateSpeed = 0.4;
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    // Hide loading
+    setTimeout(() => {
+      document.getElementById('loading').classList.add('hidden');
+    }, 800);
+
+    animate();
+  </script>
+</body>
+</html>
